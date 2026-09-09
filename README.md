@@ -8,7 +8,7 @@ A beginner-friendly terminal-based music player built step by step with Node.js.
 
 ## Current Status
 
-Project Setup
+Basic Song Library
 
 ## Roadmap
 
