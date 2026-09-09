@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor files
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.*
+!.env.example
