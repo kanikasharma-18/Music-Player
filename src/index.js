@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import decodeMp3 from '@audio/decode-mp3';
+import Speaker from 'speaker';
 import { fileURLToPath } from 'node:url';
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -54,6 +56,86 @@ function displaySongs(songs, selectedSongIndex = null) {
   });
 }
 
+let currentSpeaker = null;
+let playbackRequestId = 0;
+
+function stopCurrentSong() {
+  playbackRequestId += 1;
+
+  if (currentSpeaker !== null) {
+    currentSpeaker.end();
+    currentSpeaker = null;
+  }
+}
+
+function createPcmBuffer(channelData) {
+  const channelCount = channelData.length;
+  const frameCount = channelData[0].length;
+  const pcmBuffer = Buffer.alloc(frameCount * channelCount * 2);
+
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+      const sample = Math.max(
+        -1,
+        Math.min(1, channelData[channelIndex][frameIndex]),
+      );
+      const pcmSample = Math.round(sample * 32767);
+      const bufferOffset = (frameIndex * channelCount + channelIndex) * 2;
+      pcmBuffer.writeInt16LE(pcmSample, bufferOffset);
+    }
+  }
+
+  return pcmBuffer;
+}
+
+async function playSong(song) {
+  stopCurrentSong();
+  const requestId = ++playbackRequestId;
+
+  const songPath = path.join(songsDirectoryPath, song);
+
+  try {
+    const mp3Buffer = fs.readFileSync(songPath);
+    const decodedAudio = await decodeMp3(mp3Buffer);
+
+    if (
+      requestId !== playbackRequestId ||
+      decodedAudio.channelData.length === 0 ||
+      decodedAudio.sampleRate === 0
+    ) {
+      if (requestId === playbackRequestId) {
+        throw new Error('The file does not contain readable MP3 audio.');
+      }
+      return;
+    }
+
+    const pcmBuffer = createPcmBuffer(decodedAudio.channelData);
+    const speaker = new Speaker({
+      channels: decodedAudio.channelData.length,
+      bitDepth: 16,
+      sampleRate: decodedAudio.sampleRate,
+    });
+
+    speaker.on('error', (error) => {
+      console.error(`Audio playback error: ${error.message}`);
+      if (currentSpeaker === speaker) {
+        currentSpeaker = null;
+      }
+    });
+
+    speaker.on('close', () => {
+      if (currentSpeaker === speaker) {
+        currentSpeaker = null;
+      }
+    });
+
+    currentSpeaker = speaker;
+    speaker.end(pcmBuffer);
+  } catch (error) {
+    console.error(`Unable to play ${song}: ${error.message}`);
+  }
+}
+
 function startTerminalUi() {
   const songs = loadSongs();
 
@@ -75,6 +157,7 @@ function startTerminalUi() {
   }
 
   const exitTerminalUi = () => {
+    stopCurrentSong();
     process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write('\n');
@@ -96,7 +179,7 @@ function startTerminalUi() {
     }
 
     if (key.name === 'return') {
-      console.log(`Selected song: ${songs[selectedSongIndex]}`);
+      playSong(songs[selectedSongIndex]);
       return;
     }
 
