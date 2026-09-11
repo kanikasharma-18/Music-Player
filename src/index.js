@@ -56,16 +56,26 @@ function displaySongs(songs, selectedSongIndex = null) {
   });
 }
 
-let currentSpeaker = null;
+const playbackStates = {
+  STOPPED: 'stopped',
+  PLAYING: 'playing',
+  PAUSED: 'paused',
+};
+
+let currentPlayback = null;
+let playbackState = playbackStates.STOPPED;
 let playbackRequestId = 0;
 
 function stopCurrentSong() {
   playbackRequestId += 1;
 
-  if (currentSpeaker !== null) {
-    currentSpeaker.end();
-    currentSpeaker = null;
+  if (currentPlayback !== null) {
+    currentPlayback.stopped = true;
+    currentPlayback.speaker.close(false);
+    currentPlayback = null;
   }
+
+  playbackState = playbackStates.STOPPED;
 }
 
 function createPcmBuffer(channelData) {
@@ -86,6 +96,40 @@ function createPcmBuffer(channelData) {
   }
 
   return pcmBuffer;
+}
+
+function writeNextAudioChunk() {
+  if (
+    currentPlayback === null ||
+    currentPlayback.stopped ||
+    playbackState !== playbackStates.PLAYING
+  ) {
+    return;
+  }
+
+  const { speaker, pcmBuffer } = currentPlayback;
+  const chunkSize = speaker.channels * 2 * speaker.samplesPerFrame;
+
+  if (currentPlayback.bufferOffset >= pcmBuffer.length) {
+    speaker.end();
+    return;
+  }
+
+  const chunk = pcmBuffer.subarray(
+    currentPlayback.bufferOffset,
+    currentPlayback.bufferOffset + chunkSize,
+  );
+  currentPlayback.bufferOffset += chunk.length;
+
+  speaker.write(chunk, (error) => {
+    if (error) {
+      console.error(`Audio playback error: ${error.message}`);
+      stopCurrentSong();
+      return;
+    }
+
+    writeNextAudioChunk();
+  });
 }
 
 async function playSong(song) {
@@ -118,21 +162,41 @@ async function playSong(song) {
 
     speaker.on('error', (error) => {
       console.error(`Audio playback error: ${error.message}`);
-      if (currentSpeaker === speaker) {
-        currentSpeaker = null;
+      if (currentPlayback?.speaker === speaker) {
+        stopCurrentSong();
       }
     });
 
     speaker.on('close', () => {
-      if (currentSpeaker === speaker) {
-        currentSpeaker = null;
+      if (currentPlayback?.speaker === speaker && !currentPlayback.stopped) {
+        currentPlayback = null;
+        playbackState = playbackStates.STOPPED;
       }
     });
 
-    currentSpeaker = speaker;
-    speaker.end(pcmBuffer);
+    currentPlayback = {
+      speaker,
+      pcmBuffer,
+      bufferOffset: 0,
+      stopped: false,
+    };
+    playbackState = playbackStates.PLAYING;
+    writeNextAudioChunk();
   } catch (error) {
     console.error(`Unable to play ${song}: ${error.message}`);
+  }
+}
+
+function pauseSong() {
+  if (playbackState === playbackStates.PLAYING) {
+    playbackState = playbackStates.PAUSED;
+  }
+}
+
+function resumeSong() {
+  if (playbackState === playbackStates.PAUSED) {
+    playbackState = playbackStates.PLAYING;
+    writeNextAudioChunk();
   }
 }
 
@@ -161,6 +225,7 @@ function startTerminalUi() {
     process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write('\n');
+    process.exit(0);
   };
 
   readline.emitKeypressEvents(process.stdin);
@@ -184,7 +249,11 @@ function startTerminalUi() {
     }
 
     if (key.name === 'space') {
-      console.log('Space was pressed.');
+      if (playbackState === playbackStates.PLAYING) {
+        pauseSong();
+      } else if (playbackState === playbackStates.PAUSED) {
+        resumeSong();
+      }
       return;
     }
 
