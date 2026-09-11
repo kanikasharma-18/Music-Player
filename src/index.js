@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -26,12 +27,13 @@ export function loadSongs() {
   }
 }
 
-function displaySongs() {
-  const songs = loadSongs();
+function clearTerminal() {
+  process.stdout.write('\x1b[2J\x1b[H');
+}
 
-  console.log('🎵 Terminal Music Player');
-  console.log();
-  console.log('Available Songs:');
+function displaySongs(songs, selectedSongIndex = null) {
+  clearTerminal();
+  console.log('🎵 TERMINAL MUSIC PLAYER');
   console.log();
 
   if (songs === null) {
@@ -47,8 +49,52 @@ function displaySongs() {
   }
 
   songs.forEach((song, index) => {
-    console.log(`${index + 1}. ${song}`);
+    const selectionMarker = index === selectedSongIndex ? '>' : ' ';
+    console.log(`${selectionMarker} ${song}`);
   });
 }
 
-displaySongs();
+function startTerminalUi() {
+  const songs = loadSongs();
+
+  if (songs === null || songs.length === 0) {
+    displaySongs(songs);
+    return;
+  }
+
+  let selectedSongIndex = 0;
+
+  const render = () => {
+    displaySongs(songs, selectedSongIndex);
+  };
+
+  render();
+
+  if (!process.stdin.isTTY) {
+    return;
+  }
+
+  readline.emitKeypressEvents(process.stdin);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+
+  process.stdin.on('keypress', (_input, key) => {
+    if (key.ctrl && key.name === 'c') {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      return;
+    }
+
+    if (key.name === 'up' && selectedSongIndex > 0) {
+      selectedSongIndex -= 1;
+      render();
+    }
+
+    if (key.name === 'down' && selectedSongIndex < songs.length - 1) {
+      selectedSongIndex += 1;
+      render();
+    }
+  });
+}
+
+startTerminalUi();
