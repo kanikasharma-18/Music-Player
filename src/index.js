@@ -74,14 +74,34 @@ function startTerminalUi() {
     return;
   }
 
+  const exitTerminalUi = () => {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+    process.stdout.write('\n');
+  };
+
   readline.emitKeypressEvents(process.stdin);
   process.stdin.setRawMode(true);
   process.stdin.resume();
 
   process.stdin.on('keypress', (_input, key) => {
     if (key.ctrl && key.name === 'c') {
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
+      exitTerminalUi();
+      return;
+    }
+
+    if (key.name === 'q') {
+      exitTerminalUi();
+      return;
+    }
+
+    if (key.name === 'return') {
+      console.log(`Selected song: ${songs[selectedSongIndex]}`);
+      return;
+    }
+
+    if (key.name === 'space') {
+      console.log('Space was pressed.');
       return;
     }
 
