@@ -71,7 +71,9 @@ function stopCurrentSong() {
 
   if (currentPlayback !== null) {
     currentPlayback.stopped = true;
-    currentPlayback.speaker.close(false);
+    if (currentPlayback.speaker !== null) {
+      currentPlayback.speaker.close(false);
+    }
     currentPlayback = null;
   }
 
@@ -98,6 +100,45 @@ function createPcmBuffer(channelData) {
   return pcmBuffer;
 }
 
+function startSpeaker() {
+  if (
+    currentPlayback === null ||
+    currentPlayback.stopped ||
+    playbackState !== playbackStates.PLAYING
+  ) {
+    return;
+  }
+
+  const playback = currentPlayback;
+  const speaker = new Speaker({
+    channels: playback.channelCount,
+    bitDepth: 16,
+    sampleRate: playback.sampleRate,
+  });
+
+  speaker.on('error', (error) => {
+    if (
+      currentPlayback?.speaker !== speaker ||
+      playbackState !== playbackStates.PLAYING
+    ) {
+      return;
+    }
+
+    console.error(`Audio playback error: ${error.message}`);
+    stopCurrentSong();
+  });
+
+  speaker.on('close', () => {
+    if (currentPlayback?.speaker === speaker && !currentPlayback.stopped) {
+      currentPlayback = null;
+      playbackState = playbackStates.STOPPED;
+    }
+  });
+
+  playback.speaker = speaker;
+  writeNextAudioChunk();
+}
+
 function writeNextAudioChunk() {
   if (
     currentPlayback === null ||
@@ -108,7 +149,9 @@ function writeNextAudioChunk() {
   }
 
   const { speaker, pcmBuffer } = currentPlayback;
-  const chunkSize = speaker.channels * 2 * speaker.samplesPerFrame;
+  // Give speaker several internal frames at once so CoreAudio stays buffered.
+  const chunkSize =
+    speaker.channels * 2 * speaker.samplesPerFrame * 64;
 
   if (currentPlayback.bufferOffset >= pcmBuffer.length) {
     speaker.end();
@@ -123,6 +166,13 @@ function writeNextAudioChunk() {
 
   speaker.write(chunk, (error) => {
     if (error) {
+      if (
+        currentPlayback?.speaker !== speaker ||
+        playbackState !== playbackStates.PLAYING
+      ) {
+        return;
+      }
+
       console.error(`Audio playback error: ${error.message}`);
       stopCurrentSong();
       return;
@@ -154,49 +204,37 @@ async function playSong(song) {
     }
 
     const pcmBuffer = createPcmBuffer(decodedAudio.channelData);
-    const speaker = new Speaker({
-      channels: decodedAudio.channelData.length,
-      bitDepth: 16,
-      sampleRate: decodedAudio.sampleRate,
-    });
-
-    speaker.on('error', (error) => {
-      console.error(`Audio playback error: ${error.message}`);
-      if (currentPlayback?.speaker === speaker) {
-        stopCurrentSong();
-      }
-    });
-
-    speaker.on('close', () => {
-      if (currentPlayback?.speaker === speaker && !currentPlayback.stopped) {
-        currentPlayback = null;
-        playbackState = playbackStates.STOPPED;
-      }
-    });
-
     currentPlayback = {
-      speaker,
+      speaker: null,
+      channelCount: decodedAudio.channelData.length,
+      sampleRate: decodedAudio.sampleRate,
       pcmBuffer,
       bufferOffset: 0,
       stopped: false,
     };
     playbackState = playbackStates.PLAYING;
-    writeNextAudioChunk();
+    startSpeaker();
   } catch (error) {
     console.error(`Unable to play ${song}: ${error.message}`);
   }
 }
 
 function pauseSong() {
-  if (playbackState === playbackStates.PLAYING) {
+  if (playbackState === playbackStates.PLAYING && currentPlayback !== null) {
+    const speaker = currentPlayback.speaker;
+    currentPlayback.speaker = null;
     playbackState = playbackStates.PAUSED;
+
+    if (speaker !== null) {
+      speaker.close(false);
+    }
   }
 }
 
 function resumeSong() {
-  if (playbackState === playbackStates.PAUSED) {
+  if (playbackState === playbackStates.PAUSED && currentPlayback !== null) {
     playbackState = playbackStates.PLAYING;
-    writeNextAudioChunk();
+    startSpeaker();
   }
 }
 
