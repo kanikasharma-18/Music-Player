@@ -62,12 +62,101 @@ const playbackStates = {
   PAUSED: 'paused',
 };
 
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '00:00';
+  }
+
+  const totalSeconds = Math.floor(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(
+    remainingSeconds,
+  ).padStart(2, '0')}`;
+}
+
+function createProgressBar(currentSeconds, totalSeconds) {
+  const barWidth = 20;
+
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
+    return `[${'-'.repeat(barWidth)}]`;
+  }
+
+  const progress = Math.max(0, Math.min(1, currentSeconds / totalSeconds));
+  const filledWidth = Math.floor(progress * barWidth);
+
+  return `[${'█'.repeat(filledWidth)}${'░'.repeat(
+    barWidth - filledWidth,
+  )}]`;
+}
+
 let currentPlayback = null;
 let playbackState = playbackStates.STOPPED;
 let playbackRequestId = 0;
+let playbackInfoInterval = null;
+let refreshUi = () => {};
+
+function stopPlaybackInfoUpdates() {
+  if (playbackInfoInterval !== null) {
+    clearInterval(playbackInfoInterval);
+    playbackInfoInterval = null;
+  }
+}
+
+function startPlaybackInfoUpdates() {
+  stopPlaybackInfoUpdates();
+  playbackInfoInterval = setInterval(refreshUi, 250);
+}
+
+function getPlaybackInfo() {
+  if (currentPlayback === null) {
+    return {
+      song: null,
+      state: playbackState,
+      currentSeconds: 0,
+      totalSeconds: 0,
+    };
+  }
+
+  let currentSeconds = currentPlayback.positionSeconds;
+
+  if (
+    playbackState === playbackStates.PLAYING &&
+    currentPlayback.positionStartedAt !== null
+  ) {
+    currentSeconds +=
+      (performance.now() - currentPlayback.positionStartedAt) / 1000;
+  }
+
+  return {
+    song: currentPlayback.song,
+    state: playbackState,
+    currentSeconds: Math.min(currentSeconds, currentPlayback.totalSeconds),
+    totalSeconds: currentPlayback.totalSeconds,
+  };
+}
+
+function displayPlaybackInfo(playbackInfo) {
+  const displayState =
+    playbackInfo.state.charAt(0).toUpperCase() + playbackInfo.state.slice(1);
+
+  console.log();
+  console.log(`Now Playing: ${playbackInfo.song ?? 'None'}`);
+  console.log(`Status: ${displayState}`);
+  console.log(
+    `${createProgressBar(
+      playbackInfo.currentSeconds,
+      playbackInfo.totalSeconds,
+    )} ${formatTime(playbackInfo.currentSeconds)} / ${formatTime(
+      playbackInfo.totalSeconds,
+    )}`,
+  );
+}
 
 function stopCurrentSong() {
   playbackRequestId += 1;
+  stopPlaybackInfoUpdates();
 
   if (currentPlayback !== null) {
     currentPlayback.stopped = true;
@@ -78,6 +167,7 @@ function stopCurrentSong() {
   }
 
   playbackState = playbackStates.STOPPED;
+  refreshUi();
 }
 
 function createPcmBuffer(channelData) {
@@ -132,10 +222,13 @@ function startSpeaker() {
     if (currentPlayback?.speaker === speaker && !currentPlayback.stopped) {
       currentPlayback = null;
       playbackState = playbackStates.STOPPED;
+      stopPlaybackInfoUpdates();
+      refreshUi();
     }
   });
 
   playback.speaker = speaker;
+  playback.positionStartedAt = performance.now();
   writeNextAudioChunk();
 }
 
@@ -149,9 +242,8 @@ function writeNextAudioChunk() {
   }
 
   const { speaker, pcmBuffer } = currentPlayback;
-  // Give speaker several internal frames at once so CoreAudio stays buffered.
-  const chunkSize =
-    speaker.channels * 2 * speaker.samplesPerFrame * 64;
+  // Keep each write below speaker's 0.5-second CoreAudio FIFO capacity.
+  const chunkSize = speaker.channels * 2 * speaker.samplesPerFrame * 16;
 
   if (currentPlayback.bufferOffset >= pcmBuffer.length) {
     speaker.end();
@@ -206,14 +298,21 @@ async function playSong(song) {
     const pcmBuffer = createPcmBuffer(decodedAudio.channelData);
     currentPlayback = {
       speaker: null,
+      song,
       channelCount: decodedAudio.channelData.length,
       sampleRate: decodedAudio.sampleRate,
       pcmBuffer,
       bufferOffset: 0,
+      positionSeconds: 0,
+      positionStartedAt: null,
+      totalSeconds:
+        decodedAudio.channelData[0].length / decodedAudio.sampleRate,
       stopped: false,
     };
     playbackState = playbackStates.PLAYING;
     startSpeaker();
+    startPlaybackInfoUpdates();
+    refreshUi();
   } catch (error) {
     console.error(`Unable to play ${song}: ${error.message}`);
   }
@@ -221,9 +320,13 @@ async function playSong(song) {
 
 function pauseSong() {
   if (playbackState === playbackStates.PLAYING && currentPlayback !== null) {
+    currentPlayback.positionSeconds = getPlaybackInfo().currentSeconds;
+    currentPlayback.positionStartedAt = null;
     const speaker = currentPlayback.speaker;
     currentPlayback.speaker = null;
     playbackState = playbackStates.PAUSED;
+    stopPlaybackInfoUpdates();
+    refreshUi();
 
     if (speaker !== null) {
       speaker.close(false);
@@ -235,6 +338,8 @@ function resumeSong() {
   if (playbackState === playbackStates.PAUSED && currentPlayback !== null) {
     playbackState = playbackStates.PLAYING;
     startSpeaker();
+    startPlaybackInfoUpdates();
+    refreshUi();
   }
 }
 
@@ -250,7 +355,10 @@ function startTerminalUi() {
 
   const render = () => {
     displaySongs(songs, selectedSongIndex);
+    displayPlaybackInfo(getPlaybackInfo());
   };
+
+  refreshUi = render;
 
   render();
 
