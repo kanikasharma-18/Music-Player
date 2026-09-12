@@ -1,4 +1,4 @@
-# 🎵 Terminal Music Player
+# Terminal Music Player
 
 > A lightweight terminal-based music player built with Node.js — play your MP3 collection straight from the command line.
 
@@ -12,15 +12,15 @@ Terminal Music Player is a Node.js application that runs entirely in your termin
 
 ## Features
 
-- 📂 **Song discovery** — automatically scans the `songs/` directory and lists all `.mp3` files
-- 🎧 **MP3 decoding & playback** — decodes MP3 audio and streams it to your system speakers
-- ▶️ **Play / Pause / Resume / Stop** — full playback state management
-- ⏭️ **Auto-advance** — automatically plays the next song when the current one finishes
-- 🎹 **Keyboard controls** — navigate and control playback without leaving the terminal
-- 📊 **Progress bar** — live progress display with elapsed and total time (`MM:SS` format)
-- 🖥️ **Terminal UI** — box-drawn interface with a library panel, now-playing panel, and controls panel
-- ⚠️ **Error handling** — gracefully handles missing directories, empty libraries, unreadable files, and audio errors
-- 🚪 **Graceful exit** — cleans up audio resources and restores the terminal on quit
+- **Song discovery** — automatically scans the `songs/` directory and lists all `.mp3` files
+- **MP3 decoding & playback** — decodes MP3 audio and streams it to your system speakers
+- **Play / Pause / Resume / Stop** — full playback state management
+- **Auto-advance** — automatically plays the next song when the current one finishes
+- **Keyboard controls** — navigate and control playback without leaving the terminal
+- **Progress bar** — live progress display with elapsed and total time (`MM:SS` format)
+- **Terminal UI** — box-drawn interface with a library panel, now-playing panel, and controls panel
+- **Error handling** — gracefully handles missing directories, empty libraries, unreadable files, and audio errors
+- **Graceful exit** — cleans up audio resources and restores the terminal on quit
 
 ---
 
@@ -142,12 +142,6 @@ Music-Player/
 | Audio loading / decoding error | Catches the exception and shows the error message in the terminal |
 | Speaker / audio output error | Handled via the `error` event on the `Speaker` stream |
 | Keyboard input unavailable (non-TTY) | Detected at startup; player exits without crashing |
-
----
-
-## Screenshots / Demo
-
-> Screenshots and a demo GIF will be added after the final UI walkthrough.
 
 ---
 
