@@ -218,12 +218,26 @@ function startSpeaker() {
     stopCurrentSong();
   });
 
+  speaker.on('flush', () => {
+    if (
+      currentPlayback?.speaker === speaker &&
+      playbackState === playbackStates.PLAYING
+    ) {
+      currentPlayback.naturalEnd = true;
+    }
+  });
+
   speaker.on('close', () => {
     if (currentPlayback?.speaker === speaker && !currentPlayback.stopped) {
+      const finishedPlayback = currentPlayback;
       currentPlayback = null;
       playbackState = playbackStates.STOPPED;
       stopPlaybackInfoUpdates();
       refreshUi();
+
+      if (finishedPlayback.naturalEnd) {
+        finishedPlayback.onNaturalEnd?.();
+      }
     }
   });
 
@@ -274,7 +288,7 @@ function writeNextAudioChunk() {
   });
 }
 
-async function playSong(song) {
+async function playSong(song, onNaturalEnd = null) {
   stopCurrentSong();
   const requestId = ++playbackRequestId;
 
@@ -307,6 +321,8 @@ async function playSong(song) {
       positionStartedAt: null,
       totalSeconds:
         decodedAudio.channelData[0].length / decodedAudio.sampleRate,
+      onNaturalEnd,
+      naturalEnd: false,
       stopped: false,
     };
     playbackState = playbackStates.PLAYING;
@@ -353,6 +369,15 @@ function startTerminalUi() {
 
   let selectedSongIndex = 0;
 
+  const playSelectedSong = () => {
+    playSong(songs[selectedSongIndex], () => {
+      if (selectedSongIndex < songs.length - 1) {
+        selectedSongIndex += 1;
+        playSelectedSong();
+      }
+    });
+  };
+
   const render = () => {
     displaySongs(songs, selectedSongIndex);
     displayPlaybackInfo(getPlaybackInfo());
@@ -390,7 +415,7 @@ function startTerminalUi() {
     }
 
     if (key.name === 'return') {
-      playSong(songs[selectedSongIndex]);
+      playSelectedSong();
       return;
     }
 
