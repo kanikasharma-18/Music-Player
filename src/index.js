@@ -33,26 +33,88 @@ function clearTerminal() {
   process.stdout.write('\x1b[2J\x1b[H');
 }
 
+const terminalWidth = 56;
+const contentWidth = terminalWidth - 2;
+
+function centerText(text) {
+  const trimmedText = text.slice(0, contentWidth);
+  const leftPadding = Math.floor((contentWidth - trimmedText.length) / 2);
+  return `${' '.repeat(leftPadding)}${trimmedText}${' '.repeat(
+    contentWidth - leftPadding - trimmedText.length,
+  )}`;
+}
+
+function formatBoxLine(text = '') {
+  const maximumTextLength = Math.max(0, contentWidth - 1);
+  const trimmedText = text.slice(0, maximumTextLength);
+  const paddingLength = Math.max(
+    0,
+    contentWidth - trimmedText.length - 1,
+  );
+
+  return `║ ${trimmedText}${' '.repeat(paddingLength)}║`;
+}
+
+function displayHeader() {
+  console.log(`╔${'═'.repeat(contentWidth)}╗`);
+  console.log(`║${centerText('TERMINAL MUSIC PLAYER')}║`);
+  console.log(`║${centerText('YOUR MUSIC • COMMAND LINE EDITION')}║`);
+  console.log(`╚${'═'.repeat(contentWidth)}╝`);
+}
+
+function displayBoxTitle(title) {
+  console.log(`╔${'═'.repeat(contentWidth)}╗`);
+  console.log(`║ ${title.padEnd(contentWidth - 1)}║`);
+}
+
+function displayBoxEnd() {
+  console.log(`╚${'═'.repeat(contentWidth)}╝`);
+}
+
+function truncateSongName(song, maximumLength) {
+  const displayName = song.replace(/\.mp3$/i, '');
+
+  if (displayName.length <= maximumLength) {
+    return displayName;
+  }
+
+  return `${displayName.slice(0, maximumLength - 3)}...`;
+}
+
 function displaySongs(songs, selectedSongIndex = null) {
   clearTerminal();
-  console.log('🎵 TERMINAL MUSIC PLAYER');
+  displayHeader();
   console.log();
 
   if (songs === null) {
-    console.log('Error: songs folder not found.');
-    console.log('Please create the songs folder and add MP3 files.');
+    displayBoxTitle('MUSIC LIBRARY');
+    console.log(formatBoxLine());
+    console.log(formatBoxLine('⚠  Songs folder not found.'));
+    console.log(formatBoxLine('   Create songs/ and add MP3 files to continue.'));
+    displayBoxEnd();
     return;
   }
 
   if (songs.length === 0) {
-    console.log('Error: No MP3 files found in songs/.');
+    displayBoxTitle('MUSIC LIBRARY');
+    console.log(formatBoxLine());
+    console.log(formatBoxLine('⚠  No MP3 files found.'));
+    console.log(formatBoxLine('   Add .mp3 files to the songs/ folder.'));
+    displayBoxEnd();
     return;
   }
 
+  displayBoxTitle(`LIBRARY  •  ${selectedSongIndex + 1} / ${songs.length} TRACKS`);
+  console.log(formatBoxLine());
+
   songs.forEach((song, index) => {
-    const selectionMarker = index === selectedSongIndex ? '>' : ' ';
-    console.log(`${selectionMarker} ${song}`);
+    const selectionMarker = index === selectedSongIndex ? '▶' : ' ';
+    const trackNumber = String(index + 1).padStart(2, '0');
+    const displayName = truncateSongName(song, contentWidth - 11);
+    console.log(formatBoxLine(`${selectionMarker}  ${trackNumber}  ${displayName}`));
   });
+
+  displayBoxEnd();
 }
 
 const playbackStates = {
@@ -138,31 +200,54 @@ function getPlaybackInfo() {
 }
 
 function displayPlaybackInfo(playbackInfo) {
-  const displayState =
-    playbackInfo.state.charAt(0).toUpperCase() + playbackInfo.state.slice(1);
+  const statusLabels = {
+    playing: '▶  PLAYING',
+    paused: '⏸  PAUSED',
+    stopped: '■  STOPPED',
+  };
+  const displayState = statusLabels[playbackInfo.state] || '■  STOPPED';
+  const displaySong = playbackInfo.song
+    ? truncateSongName(playbackInfo.song, contentWidth - 5)
+    : 'Nothing selected';
 
   console.log();
-  console.log(`Now Playing: ${playbackInfo.song ?? 'None'}`);
-  console.log(`Status: ${displayState}`);
+  displayBoxTitle('NOW PLAYING');
+  console.log(formatBoxLine());
+  console.log(formatBoxLine(`♪  ${displaySong}`));
+  console.log(formatBoxLine());
+  console.log(formatBoxLine(`Status   ${displayState}`));
   console.log(
-    `${createProgressBar(
-      playbackInfo.currentSeconds,
-      playbackInfo.totalSeconds,
-    )} ${formatTime(playbackInfo.currentSeconds)} / ${formatTime(
-      playbackInfo.totalSeconds,
-    )}`,
+    formatBoxLine(
+      `${formatTime(playbackInfo.currentSeconds)}  ${createProgressBar(
+        playbackInfo.currentSeconds,
+        playbackInfo.totalSeconds,
+      )}  ${formatTime(playbackInfo.totalSeconds)}`,
+    ),
   );
+  displayBoxEnd();
 
   if (lastErrorMessage !== null) {
-    console.log(lastErrorMessage);
+    console.log();
+    displayBoxTitle('⚠  ERROR');
+    console.log(formatBoxLine(lastErrorMessage.replace(/^Error:\s*/, '')));
+    displayBoxEnd();
   }
+
+  console.log();
+  displayBoxTitle('CONTROLS');
+  console.log(formatBoxLine('↑ ↓  Navigate     Enter  Play'));
+  console.log(formatBoxLine('Space  Pause/Resume     Q  Quit'));
+  console.log(formatBoxLine('Ctrl+C  Exit'));
+  displayBoxEnd();
 }
 
 function displayStartupError(message) {
   clearTerminal();
-  console.log('🎵 TERMINAL MUSIC PLAYER');
+  displayHeader();
   console.log();
-  console.log(`Error: ${message}`);
+  displayBoxTitle('⚠  ERROR');
+  console.log(formatBoxLine(message));
+  displayBoxEnd();
 }
 
 function stopCurrentSong() {
@@ -382,6 +467,13 @@ function resumeSong() {
 
 function startTerminalUi() {
   let songs;
+
+  clearTerminal();
+  displayHeader();
+  console.log();
+  displayBoxTitle('MUSIC LIBRARY');
+  console.log(formatBoxLine('♪  Loading your music library...'));
+  displayBoxEnd();
 
   try {
     songs = loadSongs();
