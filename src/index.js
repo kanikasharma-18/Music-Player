@@ -39,14 +39,13 @@ function displaySongs(songs, selectedSongIndex = null) {
   console.log();
 
   if (songs === null) {
-    console.log('❌ Songs directory not found.');
-    console.log('Please create a songs/ directory and add MP3 files.');
+    console.log('Error: songs folder not found.');
+    console.log('Please create the songs folder and add MP3 files.');
     return;
   }
 
   if (songs.length === 0) {
-    console.log('❌ No MP3 songs found.');
-    console.log('Please add some .mp3 files to the songs/ directory.');
+    console.log('Error: No MP3 files found in songs/.');
     return;
   }
 
@@ -96,6 +95,7 @@ let playbackState = playbackStates.STOPPED;
 let playbackRequestId = 0;
 let playbackInfoInterval = null;
 let refreshUi = () => {};
+let lastErrorMessage = null;
 
 function stopPlaybackInfoUpdates() {
   if (playbackInfoInterval !== null) {
@@ -152,6 +152,17 @@ function displayPlaybackInfo(playbackInfo) {
       playbackInfo.totalSeconds,
     )}`,
   );
+
+  if (lastErrorMessage !== null) {
+    console.log(lastErrorMessage);
+  }
+}
+
+function displayStartupError(message) {
+  clearTerminal();
+  console.log('🎵 TERMINAL MUSIC PLAYER');
+  console.log();
+  console.log(`Error: ${message}`);
 }
 
 function stopCurrentSong() {
@@ -167,6 +178,13 @@ function stopCurrentSong() {
   }
 
   playbackState = playbackStates.STOPPED;
+  refreshUi();
+}
+
+function handlePlaybackError(song, error) {
+  const reason = error?.message || 'The audio file may be corrupted or unsupported.';
+  lastErrorMessage = `Error: Unable to play "${song}". ${reason}`;
+  stopCurrentSong();
   refreshUi();
 }
 
@@ -214,8 +232,7 @@ function startSpeaker() {
       return;
     }
 
-    console.error(`Audio playback error: ${error.message}`);
-    stopCurrentSong();
+    handlePlaybackError(currentPlayback.song, error);
   });
 
   speaker.on('flush', () => {
@@ -279,8 +296,7 @@ function writeNextAudioChunk() {
         return;
       }
 
-      console.error(`Audio playback error: ${error.message}`);
-      stopCurrentSong();
+      handlePlaybackError(currentPlayback.song, error);
       return;
     }
 
@@ -290,6 +306,7 @@ function writeNextAudioChunk() {
 
 async function playSong(song, onNaturalEnd = null) {
   stopCurrentSong();
+  lastErrorMessage = null;
   const requestId = ++playbackRequestId;
 
   const songPath = path.join(songsDirectoryPath, song);
@@ -330,7 +347,7 @@ async function playSong(song, onNaturalEnd = null) {
     startPlaybackInfoUpdates();
     refreshUi();
   } catch (error) {
-    console.error(`Unable to play ${song}: ${error.message}`);
+    handlePlaybackError(song, error);
   }
 }
 
@@ -352,15 +369,28 @@ function pauseSong() {
 
 function resumeSong() {
   if (playbackState === playbackStates.PAUSED && currentPlayback !== null) {
-    playbackState = playbackStates.PLAYING;
-    startSpeaker();
-    startPlaybackInfoUpdates();
-    refreshUi();
+    try {
+      playbackState = playbackStates.PLAYING;
+      startSpeaker();
+      startPlaybackInfoUpdates();
+      refreshUi();
+    } catch (error) {
+      handlePlaybackError(currentPlayback?.song || 'current song', error);
+    }
   }
 }
 
 function startTerminalUi() {
-  const songs = loadSongs();
+  let songs;
+
+  try {
+    songs = loadSongs();
+  } catch (error) {
+    displayStartupError(
+      `Unable to read songs folder. ${error.message || 'Please check its permissions.'}`,
+    );
+    return;
+  }
 
   if (songs === null || songs.length === 0) {
     displaySongs(songs);
@@ -370,6 +400,10 @@ function startTerminalUi() {
   let selectedSongIndex = 0;
 
   const playSelectedSong = () => {
+    if (selectedSongIndex < 0 || selectedSongIndex >= songs.length) {
+      return;
+    }
+
     playSong(songs[selectedSongIndex], () => {
       if (selectedSongIndex < songs.length - 1) {
         selectedSongIndex += 1;
@@ -392,6 +426,7 @@ function startTerminalUi() {
   }
 
   const exitTerminalUi = () => {
+    process.stdin.removeListener('keypress', handleKeypress);
     stopCurrentSong();
     process.stdin.setRawMode(false);
     process.stdin.pause();
@@ -399,11 +434,27 @@ function startTerminalUi() {
     process.exit(0);
   };
 
-  readline.emitKeypressEvents(process.stdin);
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
+  try {
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+  } catch (error) {
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+    }
 
-  process.stdin.on('keypress', (_input, key) => {
+    displayStartupError(
+      `Unable to enable keyboard input. ${error.message || 'Please use a TTY.'}`,
+    );
+    return;
+  }
+
+  const handleKeypress = (_input, key) => {
+    if (!key || typeof key.name !== 'string') {
+      return;
+    }
+
     if (key.ctrl && key.name === 'c') {
       exitTerminalUi();
       return;
@@ -437,7 +488,9 @@ function startTerminalUi() {
       selectedSongIndex += 1;
       render();
     }
-  });
+  };
+
+  process.stdin.on('keypress', handleKeypress);
 }
 
 startTerminalUi();
